@@ -67,7 +67,7 @@ bot.once(Events.ClientReady, async () => {
     console.log("Running daily Steam sale check...");
 
     try {
-      const channel = await bot.channels.fetch("1529130651993899190");
+      const channel = await bot.channels.fetch("1150060620255862875");
 
       const today = new Date();
       today.setHours(0, 0, 0, 0);
