@@ -14,6 +14,35 @@ const bot = new Client({
 
 let dynamicSteamSales = [];
 
+const getSaleDates = (dateStr) => {
+  try {
+    const yearMatch = dateStr.match(/,\s*(\d{4})/);
+    const endYear = yearMatch ? parseInt(yearMatch[1]) : new Date().getFullYear();
+
+    const withoutYear = dateStr.replace(/,\s*\d{4}/, '').trim();
+    const parts = withoutYear.split('-');
+
+    if (parts.length !== 2) return null;
+
+    const startStr = parts[0].trim();
+    const endStr = parts[1].trim();
+
+    const endDate = new Date(`${endStr}, ${endYear}`);
+    let startDate = new Date(`${startStr}, ${endYear}`);
+
+    if (startDate > endDate) {
+      startDate.setFullYear(endYear - 1);
+    }
+    startDate.setHours(0, 0, 0, 0);
+    endDate.setHours(23, 59, 59, 999);
+
+    return { startDate, endDate };
+  } catch (error) {
+    console.error("Error parsing date:", error);
+    return null;
+  }
+};
+
 bot.once(Events.ClientReady, async () => {
   console.log(`Logged in as ${bot.user.username}`);
 
@@ -41,16 +70,17 @@ bot.once(Events.ClientReady, async () => {
       const channel = await bot.channels.fetch("1529130651993899190");
 
       const today = new Date();
-      const currentDayMonth = `${String(today.getDate()).padStart(2, '0')}.${String(today.getMonth() + 1).padStart(2, '0')}`;
+      today.setHours(0, 0, 0, 0);
 
       const activeSale = dynamicSteamSales.find(sale => {
-        const startDate = sale.date.split('-')[0];
-        return startDate === currentDayMonth;
+        const dates = getSaleDates(sale.date);
+        if (!dates) return false;
+        return dates.startDate.getTime() === today.getTime();
       });
 
       if (activeSale) {
-        const endDate = activeSale.date.split('-')[1];
-        await channel.send(`@everyone Увага! Почався **${activeSale.name}**! Він триватиме до ${endDate}.`);
+        const endDateStr = activeSale.date.split('-')[1].trim();
+        await channel.send(`@everyone Увага! Почався **${activeSale.name}**! Він триватиме до ${endDateStr}.`);
         console.log(`Sale message sent for: ${activeSale.name}`);
       } else {
         console.log("No Steam sales starting today.");
@@ -70,16 +100,7 @@ bot.on(Events.MessageCreate, (message) => {
 
   const args = message.content.slice(1).trim().split(/ +/);
   const command = args.shift().toLowerCase();
-
   const now = new Date();
-  const currentYear = now.getFullYear();
-
-  const parseDate = (dateStr) => {
-    if (!dateStr || dateStr.includes("00.00")) return new Date(currentYear + 1, 0, 1);
-
-    const [day, month] = dateStr.split('.');
-    return new Date(currentYear, parseInt(month) - 1, parseInt(day));
-  };
 
   if (command === 'list') {
     console.log(`Command !list executed by ${message.author.tag}`);
@@ -104,21 +125,14 @@ bot.on(Events.MessageCreate, (message) => {
     console.log(`Command !recent executed by ${message.author.tag}`);
 
     const activeSale = dynamicSteamSales.find(sale => {
-      if (sale.date.includes("00.00")) return false; // Пропускаємо невідформатовані дати
-
-      const [startStr, endStr] = sale.date.split('-');
-      const startDate = parseDate(startStr);
-      let endDate = parseDate(endStr);
-
-      if (endDate < startDate) {
-        endDate.setFullYear(endDate.getFullYear() + 1);
-      }
-
-      return now >= startDate && now <= endDate;
+      const dates = getSaleDates(sale.date);
+      if (!dates) return false;
+      return now >= dates.startDate && now <= dates.endDate;
     });
 
     if (activeSale) {
-      message.channel.send(`Зараз проходить **${activeSale.name}**! Він триватиме до ${activeSale.date.split('-')[1]}.`);
+      const endDateStr = activeSale.date.split('-')[1].trim();
+      message.channel.send(`Зараз проходить **${activeSale.name}**! Він триватиме до ${endDateStr}.`);
     } else {
       message.channel.send("Наразі немає активних розпродажів.");
     }
@@ -128,14 +142,15 @@ bot.on(Events.MessageCreate, (message) => {
     console.log(`Command !next executed by ${message.author.tag}`);
 
     const nextSale = dynamicSteamSales.find(sale => {
-      if (sale.date.includes("00.00")) return false;
-
-      const startDate = parseDate(sale.date.split('-')[0]);
-      return startDate > now;
+      const dates = getSaleDates(sale.date);
+      if (!dates) return false;
+      return dates.startDate > now;
     });
 
     if (nextSale) {
-      message.channel.send(`Наступний розпродаж: **${nextSale.name}**. Почнеться ${nextSale.date.split('-')[0]}.`);
+
+      const startDateStr = nextSale.date.split('-')[0].trim();
+      message.channel.send(`Наступний розпродаж: **${nextSale.name}**. Почнеться ${startDateStr}.`);
     } else {
       message.channel.send("У цьому році більше не заплановано розпродажів.");
     }
