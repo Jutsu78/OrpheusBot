@@ -1,7 +1,7 @@
 require('dotenv').config();
 const cron = require('node-cron');
-const { Client, GatewayIntentBits, Collection, Events } = require("discord.js");
-const steamSales = require('./sales.js');
+const { Client, GatewayIntentBits, Events } = require("discord.js");
+const { fetchSalesData } = require('./scraper.js');
 
 const bot = new Client({
   intents: [
@@ -12,8 +12,27 @@ const bot = new Client({
   ],
 });
 
+let dynamicSteamSales = [];
+
 bot.once(Events.ClientReady, async () => {
   console.log(`Logged in as ${bot.user.username}`);
+
+  console.log("Fetching initial sales data...");
+  const initialData = await fetchSalesData();
+  if (initialData.length > 0) {
+    dynamicSteamSales = initialData;
+  }
+
+  cron.schedule('0 3 * * 1', async () => {
+    console.log("Running weekly background data update...");
+    const updatedData = await fetchSalesData();
+    if (updatedData.length > 0) {
+      dynamicSteamSales = updatedData;
+      console.log("In-memory sales data refreshed successfully.");
+    }
+  }, {
+    timezone: "Europe/Kyiv"
+  });
 
   cron.schedule('0 20 * * *', async () => {
     console.log("Running daily Steam sale check...");
@@ -24,7 +43,7 @@ bot.once(Events.ClientReady, async () => {
       const today = new Date();
       const currentDayMonth = `${String(today.getDate()).padStart(2, '0')}.${String(today.getMonth() + 1).padStart(2, '0')}`;
 
-      const activeSale = steamSales.find(sale => {
+      const activeSale = dynamicSteamSales.find(sale => {
         const startDate = sale.date.split('-')[0];
         return startDate === currentDayMonth;
       });
@@ -56,6 +75,8 @@ bot.on(Events.MessageCreate, (message) => {
   const currentYear = now.getFullYear();
 
   const parseDate = (dateStr) => {
+    if (!dateStr || dateStr.includes("00.00")) return new Date(currentYear + 1, 0, 1);
+
     const [day, month] = dateStr.split('.');
     return new Date(currentYear, parseInt(month) - 1, parseInt(day));
   };
@@ -63,9 +84,14 @@ bot.on(Events.MessageCreate, (message) => {
   if (command === 'list') {
     console.log(`Command !list executed by ${message.author.tag}`);
     let response = "**Розклад розпродажів Steam:**\n";
-    steamSales.forEach(sale => {
-      response += `• **${sale.name}**: ${sale.date}\n`;
-    });
+
+    if (dynamicSteamSales.length === 0) {
+      response += "Наразі немає даних про розпродажі.\n";
+    } else {
+      dynamicSteamSales.forEach(sale => {
+        response += `• **${sale.name}**: ${sale.date}\n`;
+      });
+    }
     message.channel.send(response);
   }
 
@@ -77,7 +103,9 @@ bot.on(Events.MessageCreate, (message) => {
   else if (command === 'recent') {
     console.log(`Command !recent executed by ${message.author.tag}`);
 
-    const activeSale = steamSales.find(sale => {
+    const activeSale = dynamicSteamSales.find(sale => {
+      if (sale.date.includes("00.00")) return false; // Пропускаємо невідформатовані дати
+
       const [startStr, endStr] = sale.date.split('-');
       const startDate = parseDate(startStr);
       let endDate = parseDate(endStr);
@@ -99,7 +127,9 @@ bot.on(Events.MessageCreate, (message) => {
   else if (command === 'next') {
     console.log(`Command !next executed by ${message.author.tag}`);
 
-    const nextSale = steamSales.find(sale => {
+    const nextSale = dynamicSteamSales.find(sale => {
+      if (sale.date.includes("00.00")) return false;
+
       const startDate = parseDate(sale.date.split('-')[0]);
       return startDate > now;
     });
